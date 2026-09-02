@@ -26,6 +26,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 from app.config import (
     PROJECT_ID,
     GEMINI_MODEL,
+    GlobalGemini,
     GKE_CLUSTER_NAME,
     GKE_CLUSTER_REGION,
     GKE_MCP_SERVER,
@@ -173,7 +174,7 @@ _simulator_tools = [
 
 outage_simulator = Agent(
     name="outage_simulator",
-    model=Gemini(
+    model=GlobalGemini(
         model=GEMINI_MODEL,
     ),
     instruction=_SIMULATOR_INSTRUCTION,

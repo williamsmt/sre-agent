@@ -27,7 +27,7 @@ if str(ROOT_DIR) not in sys.path:
 
 load_dotenv(ROOT_DIR / ".env")
 
-from app.config import PROJECT_ID, GEMINI_LOCATION, GKE_CLUSTER_NAME, GKE_CLUSTER_REGION
+from app.config import PROJECT_ID, GEMINI_LOCATION, GKE_CLUSTER_NAME, GKE_CLUSTER_REGION, GEMINI_MODEL
 
 # =========================================================================
 # 1. PAGE SETUP & MINIMALIST STYLING
@@ -99,7 +99,7 @@ st.markdown("""
 st.markdown(f"""
 <div class="header-container">
     <div class="header-title">🛡️ NovaSRE — Incident Control Room</div>
-    <div class="header-sub">Production Cluster: {GKE_CLUSTER_NAME} | Region: {GKE_CLUSTER_REGION} | Project: {PROJECT_ID or 'Local-Sandbox'}</div>
+    <div class="header-sub">Production Cluster: {GKE_CLUSTER_NAME} | Region: {GKE_CLUSTER_REGION} | Model: <code>{GEMINI_MODEL}</code> | Project: {PROJECT_ID or 'Local-Sandbox'}</div>
 </div>
 """, unsafe_allow_html=True)
 
