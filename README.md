@@ -295,7 +295,7 @@ gcloud billing projects link $GCP_PROJECT_ID --billing-account=$BILLING_ACCOUNT_
 cat <<EOF > .env
 GCP_PROJECT_ID="$GCP_PROJECT_ID"
 GOOGLE_CLOUD_LOCATION="$GCP_REGION"
-GEMINI_MODEL="gemini-2.5-pro"
+GEMINI_MODEL="gemini-3.7-flash"
 EOF
 
 # 3. Initialize and apply Terraform (provisions VPC, GKE, BigQuery seed, and GCS Playbooks)

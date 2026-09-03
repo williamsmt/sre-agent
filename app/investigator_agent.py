@@ -28,6 +28,7 @@ from app.config import (
     PROJECT_ID,
     GEMINI_LOCATION,
     GEMINI_MODEL,
+    GlobalGemini,
     GKE_CLUSTER_NAME,
     GKE_CLUSTER_REGION,
     LOGGING_MCP_SERVER,
@@ -447,7 +448,7 @@ _rca_tools = [
 
 rca_telemetry_expert = Agent(
     name="rca_telemetry_expert",
-    model=Gemini(
+    model=GlobalGemini(
         model=GEMINI_MODEL,
     ),
     instruction=_RCA_INSTRUCTION,
@@ -483,7 +484,7 @@ _reporting_tools = [
 
 incident_report_writer = Agent(
     name="incident_report_writer",
-    model=Gemini(
+    model=GlobalGemini(
         model=GEMINI_MODEL,
     ),
     instruction=_REPORTING_INSTRUCTION,

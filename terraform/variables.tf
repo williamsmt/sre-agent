@@ -44,7 +44,7 @@ variable "gcp_zone" {
 variable "gemini_model" {
   description = "The Gemini model ID to use for the Investigator and Remediation agents."
   type        = string
-  default     = "gemini-2.5-pro"
+  default     = "gemini-3.7-flash"
 }
 
 variable "deploy_infrastructure" {

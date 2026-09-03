@@ -202,11 +202,44 @@ if PROJECT_ID:
     os.environ["GOOGLE_CLOUD_PROJECT"] = str(PROJECT_ID)
 
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
+os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
+os.environ.setdefault("GOOGLE_API_USE_MTLS_ENDPOINT", "never")
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
-GEMINI_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+# Support generic environment variables for Gemini model selection
+GEMINI_MODEL = (
+    os.environ.get("GEMINI_MODEL")
+    or os.environ.get("GOOGLE_GENAI_MODEL")
+    or os.environ.get("MODEL_NAME")
+    or os.environ.get("MODEL_ID")
+    or "gemini-3.7-flash"
+)
+os.environ["GEMINI_MODEL"] = str(GEMINI_MODEL)
+GEMINI_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", os.environ.get("GOOGLE_CLOUD_REGION", "us-central1"))
 GKE_CLUSTER_NAME = os.environ.get("GKE_CLUSTER_NAME", "online-boutique")
 GKE_CLUSTER_REGION = os.environ.get("GKE_CLUSTER_REGION", GEMINI_LOCATION)
+
+from google.adk.models import Gemini
+from google.genai import Client, types
+
+class GlobalGemini(Gemini):
+    """Gemini model routed directly to Vertex AI global publisher models with per-request event loop isolation and exponential retry backoff."""
+    @property
+    def api_client(self) -> Client:
+        return Client(
+            vertexai=True,
+            location="global",
+            project=PROJECT_ID,
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(
+                    attempts=5,
+                    initial_delay=2.0,
+                    max_delay=60.0,
+                    exp_base=2.0,
+                    http_status_codes=[408, 429, 500, 502, 503, 504]
+                )
+            )
+        )
+
 
 # =========================================================================
 # 3. CENTRALIZED LAZY TOOLSET & DYNAMIC ONEMCP FACTORY

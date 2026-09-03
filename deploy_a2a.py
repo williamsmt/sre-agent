@@ -61,8 +61,14 @@ from dotenv import load_dotenv
 load_dotenv(".env")
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
-LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", os.environ.get("GOOGLE_CLOUD_REGION", "us-central1"))
+GEMINI_MODEL = (
+    os.environ.get("GEMINI_MODEL")
+    or os.environ.get("GOOGLE_GENAI_MODEL")
+    or os.environ.get("MODEL_NAME")
+    or os.environ.get("MODEL_ID")
+    or "gemini-3.7-flash"
+)
 
 if not PROJECT_ID:
     _, PROJECT_ID = google.auth.default()
@@ -164,6 +170,9 @@ def deploy_agent(display_name: str, module_name: str, entrypoint_object: str, en
         "GCP_PROJECT_ID": PROJECT_ID,
         "GEMINI_MODEL": GEMINI_MODEL,
         "GOOGLE_GENAI_USE_VERTEXAI": "1",
+        "GOOGLE_GENAI_LOCATION": "global",
+        "GOOGLE_API_USE_CLIENT_CERTIFICATE": "false",
+        "GOOGLE_API_USE_MTLS_ENDPOINT": "never",
         "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
         "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED": "true",
         "OTEL_INSTRUMENTATION_A2A_SDK_ENABLED": "false",
@@ -245,13 +254,14 @@ def main():
         inv_app = deploy_agent(display_name="rca-telemetry-expert", module_name="app.investigator_agent", entrypoint_object="agent_engine")
         print(f"\n🚀 Newly deployed Investigator Agent URN: {inv_app.resource_name}")
         try:
-            import subprocess
+            import subprocess, shutil
+            gcloud_bin = shutil.which("gcloud") or "/usr/local/google/home/madhavikarra/google-cloud-sdk/bin/gcloud"
             print("\n⚡ Automatically syncing fresh Investigator URN to live Cloud Run service 'novasre-control-room'...")
             subprocess.run([
-                "gcloud", "run", "services", "update", "novasre-control-room",
+                gcloud_bin, "run", "services", "update", "novasre-control-room",
                 "--region", LOCATION,
                 "--project", PROJECT_ID,
-                f"--update-env-vars=INVESTIGATOR_AGENT_URN={inv_app.resource_name}"
+                f"--update-env-vars=INVESTIGATOR_AGENT_URN={inv_app.resource_name},GEMINI_MODEL={GEMINI_MODEL},GOOGLE_GENAI_LOCATION=global,GOOGLE_API_USE_CLIENT_CERTIFICATE=false,GOOGLE_API_USE_MTLS_ENDPOINT=never"
             ], check=True)
             print("✅ Cloud Run service updated successfully with new investigator URN!")
         except Exception as e:
@@ -299,7 +309,7 @@ def main():
             gcloud_bin, "run", "services", "update", "novasre-control-room",
             "--region", LOCATION,
             "--project", PROJECT_ID,
-            f"--update-env-vars=REMEDIATION_AGENT_URN={deployed_urns.get('remediation-executor')},OUTAGE_SIMULATOR_URN={deployed_urns.get('outage-simulator')},INVESTIGATOR_AGENT_URN={deployed_urns.get('rca-telemetry-expert')}"
+            f"--update-env-vars=REMEDIATION_AGENT_URN={deployed_urns.get('remediation-executor')},OUTAGE_SIMULATOR_URN={deployed_urns.get('outage-simulator')},INVESTIGATOR_AGENT_URN={deployed_urns.get('rca-telemetry-expert')},GEMINI_MODEL={GEMINI_MODEL},GOOGLE_GENAI_LOCATION=global,GOOGLE_API_USE_CLIENT_CERTIFICATE=false,GOOGLE_API_USE_MTLS_ENDPOINT=never"
         ], check=True)
         print("✅ Cloud Run service 'novasre-control-room' updated successfully with new agent URNs!")
     except Exception as e:
