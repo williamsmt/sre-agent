@@ -18,11 +18,6 @@ output "staging_bucket" {
   value       = module.foundation.staging_bucket_name
 }
 
-output "novasre_control_room_url" {
-  description = "The live URL of the NovaSRE Control Room Web UI on Google Cloud Run."
-  value       = module.portal_cloud_run.portal_url
-}
-
 output "playbooks_gcs_bucket" {
   description = "The central GCS bucket containing modular SRE markdown playbooks."
   value       = module.playbooks_gcs.playbooks_bucket_name

@@ -215,6 +215,9 @@ GEMINI_MODEL = (
 )
 os.environ["GEMINI_MODEL"] = str(GEMINI_MODEL)
 GEMINI_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", os.environ.get("GOOGLE_CLOUD_REGION", "us-central1"))
+# Separate location for model inference (agent A2A code overrides GOOGLE_CLOUD_LOCATION
+# to the deployment region; model calls must stay on the global endpoint).
+GEMINI_MODEL_LOCATION = os.environ.get("GEMINI_MODEL_LOCATION", "global")
 GKE_CLUSTER_NAME = os.environ.get("GKE_CLUSTER_NAME", "online-boutique")
 GKE_CLUSTER_REGION = os.environ.get("GKE_CLUSTER_REGION", GEMINI_LOCATION)
 
@@ -227,7 +230,7 @@ class GlobalGemini(Gemini):
     def api_client(self) -> Client:
         return Client(
             vertexai=True,
-            location="global",
+            location=GEMINI_MODEL_LOCATION,
             project=PROJECT_ID,
             http_options=types.HttpOptions(
                 retry_options=types.HttpRetryOptions(

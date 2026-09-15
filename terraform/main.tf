@@ -18,7 +18,6 @@
  * Master Switches:
  * - var.deploy_infrastructure: Controls VPC, Subnet, and GKE Autopilot cluster creation.
  * - var.deploy_agents: Controls Vertex AI Reasoning Engine container deployment.
- * - var.deploy_web_portal: Controls Cloud Run NovaSRE Control Room UI deployment.
  */
 
 resource "google_project" "new_project" {
@@ -90,16 +89,4 @@ module "agent_deployer" {
   depends_on_apis       = module.foundation.apis_enabled
   depends_on_iam        = module.iam.sre_agent_sa_email
   depends_on            = [module.foundation, module.iam]
-}
-
-module "portal_cloud_run" {
-  source                 = "./modules/portal_cloud_run"
-  gcp_project_id         = var.gcp_project_id
-  gcp_region             = var.gcp_region
-  investigator_agent_urn = "projects/${var.gcp_project_id}/locations/${var.gcp_region}/reasoningEngines/rca-telemetry-expert"
-  remediation_agent_urn  = "projects/${var.gcp_project_id}/locations/${var.gcp_region}/reasoningEngines/remediation-executor"
-  outage_simulator_urn   = "projects/${var.gcp_project_id}/locations/${var.gcp_region}/reasoningEngines/outage-simulator"
-  deploy_web_portal      = var.deploy_web_portal
-  depends_on_agents      = module.agent_deployer.deploy_job_id
-  depends_on             = [module.agent_deployer]
 }

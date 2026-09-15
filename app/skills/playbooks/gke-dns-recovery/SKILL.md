@@ -11,5 +11,5 @@ description: Playbook 6 (Tier 1 Auto-Recovery) — Use when GKE Cluster DNS (cor
 
 ## Remediation Action (Tier 1 - Fast-Path Auto-Recovery)
 1. You are pre-approved to **automatically scale CoreDNS back up to healthy capacity** (`2 replicas`).
-2. Call `remediation_executor_remote("scale deployment coredns in namespace kube-system to 2 replicas in cluster online-boutique in region us-central1")` automatically.
+2. Call `remediation_executor_remote("scale deployment coredns in namespace kube-system to 2 replicas in cluster online-boutique")` automatically.
 3. Verify that `status.readyReplicas` returns to `2/2` and internal DNS resolution succeeds. Report `SUCCESS`.

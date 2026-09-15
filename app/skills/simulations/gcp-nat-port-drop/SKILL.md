@@ -9,7 +9,7 @@ You are executing a controlled **Chaos Engineering / Network Outage Simulation**
 
 ## Target Resource
 * **Resource Type**: Cloud NAT Router Gateway
-* **Resource Name**: `nat-gateway-us-central1`
+* **Resource Name**: the active NAT gateway for the cluster region
 * **Target Workload**: `paymentservice`
 * **Namespace**: `default`
 

@@ -11,5 +11,5 @@ description: Playbook 5 (Tier 2 HITL Approval) — Use when a GKE microservice (
 
 ## Remediation Action (Tier 2 - HITL Approval Required)
 1. Present the recommended network unblock plan to the human operator: `"Remove restrictive NetworkPolicy 'chaos-block-checkoutservice' in namespace 'default' to restore pod ingress/egress network connectivity."`
-2. Upon operator approval (`APPROVED`), call `remediation_executor_remote("delete networkpolicy chaos-block-checkoutservice in namespace default in cluster online-boutique in region us-central1")`.
+2. Upon operator approval (`APPROVED`), call `remediation_executor_remote("delete networkpolicy chaos-block-checkoutservice in namespace default in cluster online-boutique")`.
 3. Verify that Pod-to-Pod connectivity is restored and report `SUCCESS`.

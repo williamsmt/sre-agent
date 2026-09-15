@@ -58,9 +58,3 @@ variable "deploy_agents" {
   type        = bool
   default     = true
 }
-
-variable "deploy_web_portal" {
-  description = "Set to true (default) to build and deploy the minimalist NovaSRE Control Room Web UI to Google Cloud Run."
-  type        = bool
-  default     = true
-}
