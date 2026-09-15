@@ -14,12 +14,6 @@ The NovaSRE ecosystem consists of specialized Vertex AI Reasoning Engine agents,
 
 ```mermaid
 graph TD
-    subgraph SRE Control Room [UI: novasre-control-room on Cloud Run]
-        UI[Streamlit Web Portal & AI Companion<br/>HITL Approval & Routing]
-        LedgerUI[Recent Releases Tab<br/>BigQuery Deployment Ledger View]
-        ReportUI[Post-Mortem Tab<br/>Async Incident Reports View]
-    end
-
     subgraph Vertex AI Reasoning Engines [Google Cloud Vertex AI Serverless Agents]
         InvAgent[Investigator Agent<br/><b>rca_telemetry_expert</b><br/>Read-Only Diagnostician]
         RemAgent[Remediation Worker<br/><b>remediation_executor</b><br/>A2A Mutating Engine]
@@ -51,16 +45,8 @@ graph TD
         GCS[GCS Bucket<br/>gs://project-telemetry & Playbooks]
     end
 
-    %% UI & Agent Interactions
-    UI <-->|1. Trigger Alert / Natural Chat| InvAgent
-    UI -->|2. Trigger Controlled Scenario| SimAgent
-    UI -->|3. HITL Operator Approval| InvAgent
-    LedgerUI <-->|Live Query| BQ
-    ReportUI <-->|Read Markdown Post-Mortems| GCS
-
     %% Agent-to-Agent (A2A) and Worker Delegation
     InvAgent -->|A2A Protocol: Execute Approved Healing| RemAgent
-    UI -.->|Async Background Thread| DocAgent
 
     %% Skills Association
     InvAgent --- DiagSkills
@@ -112,9 +98,6 @@ graph TD
 
 4. **`outage_simulator` (The Chaos Engineering Agent)**:
    * **Function**: An autonomous chaos engineering agent that dynamically loads simulation playbooks from `app/skills/simulations/` and injects controlled failure modes (pod crashes, replica downscales, bad image rollouts, CoreDNS outages, NetworkPolicy isolation, Cloud NAT port drops, and broken service routing) into the `online-boutique` GKE cluster.
-
-5. **`novasre-control-room` (The Incident Operations Center UI)**:
-   * **Function**: A sleek, responsive Streamlit application running on Cloud Run (`$0` idle cost). Features the `💬 NovaSRE AI Companion`, real-time BigQuery deployment ledger views, interactive **Human-in-the-Loop (`HITL`) Approval Cards** (`[ ✅ Approve & Execute ]`), and an asynchronous Post-Mortem Report viewer.
 
 ---
 
@@ -295,7 +278,7 @@ gcloud billing projects link $GCP_PROJECT_ID --billing-account=$BILLING_ACCOUNT_
 cat <<EOF > .env
 GCP_PROJECT_ID="$GCP_PROJECT_ID"
 GOOGLE_CLOUD_LOCATION="$GCP_REGION"
-GEMINI_MODEL="gemini-2.5-pro"
+GEMINI_MODEL="gemini-3.6-flash"
 EOF
 
 # 3. Initialize and apply Terraform (provisions VPC, GKE, BigQuery seed, and GCS Playbooks)
@@ -306,10 +289,6 @@ terraform apply -var="gcp_project_id=$GCP_PROJECT_ID" -var="gcp_region=$GCP_REGI
 # 4. Deploy Vertex AI Reasoning Engines (Investigator, Remediation, and Simulator)
 cd ..
 python3 deploy_a2a.py
-
-# 5. Deploy the NovaSRE Control Room UI to Cloud Run
-cd terraform
-terraform apply -var="gcp_project_id=$GCP_PROJECT_ID" -var="gcp_region=$GCP_REGION" -var="deploy_web_portal=true" -auto-approve
 ```
 
 ---
@@ -326,37 +305,10 @@ cd terraform
 terraform init
 terraform apply -var="gcp_project_id=$GCP_PROJECT_ID" -var="gcp_region=$GCP_REGION" -var="deploy_infrastructure=false" -auto-approve
 
-# 2. Deploy AI Agents & Web Portal
+# 2. Deploy AI Agents
 cd ..
 python3 deploy_a2a.py
-cd terraform && terraform apply -var="deploy_web_portal=true" -auto-approve
 ```
-
----
-
-### Post-Deployment: Sync Correct Agent URNs to Cloud Run
-Because Vertex AI Reasoning Engine invocations strictly require **numerical resource URNs** (e.g., `projects/1234567890/locations/us-central1/reasoningEngines/9876543210`) rather than string display names, ensure your Cloud Run service is synchronized with the live numeric URNs generated during deployment.
-
-Once Terraform completes deploying the web portal, run the following command sequence to retrieve your live Reasoning Engine URNs and sync them directly to Cloud Run:
-
-```bash
-# 1. Retrieve Project Number
-export GCP_PROJECT_NUM=$(gcloud projects describe $GCP_PROJECT_ID --format="value(projectNumber)")
-
-# 2. Extract active numeric URNs from Vertex AI Reasoning Engine registry
-export SIM_URN=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://${GCP_REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJECT_NUM}/locations/${GCP_REGION}/reasoningEngines" | grep -B 1 '"displayName": "outage-simulator"' | grep 'projects/' | grep -o 'projects/[^"]*')
-export REM_URN=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://${GCP_REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJECT_NUM}/locations/${GCP_REGION}/reasoningEngines" | grep -B 1 '"displayName": "remediation-executor"' | grep 'projects/' | grep -o 'projects/[^"]*')
-export INV_URN=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://${GCP_REGION}-aiplatform.googleapis.com/v1beta1/projects/${GCP_PROJECT_NUM}/locations/${GCP_REGION}/reasoningEngines" | grep -B 1 '"displayName": "rca-telemetry-expert"' | grep 'projects/' | grep -o 'projects/[^"]*')
-
-# 3. Update the live Cloud Run web portal with the numeric URNs
-gcloud run services update novasre-control-room \
-  --region $GCP_REGION \
-  --project $GCP_PROJECT_ID \
-  --update-env-vars="OUTAGE_SIMULATOR_URN=${SIM_URN},REMEDIATION_AGENT_URN=${REM_URN},INVESTIGATOR_AGENT_URN=${INV_URN}"
-```
-
-> [!NOTE]  
-> Syncing the numerical URNs prevents Vertex AI SDK HTTP `400 Invalid ReasoningEngine resource name` errors during live outage simulation calls.
 
 ---
 
@@ -366,29 +318,7 @@ You can verify and demonstrate the complete **NovaSRE** self-healing architectur
 
 ---
 
-### Option A: Test via the Web Portal (Streamlit UI)
-
-Once deployed, retrieve the live **NovaSRE Control Room URL**:
-```bash
-cd terraform && terraform output novasre_control_room_url
-```
-
-Open the HTTPS URL in your browser and run through the live demo workflows:
-
-1. **Check the Deployment Ledger**: In the top tab bar, switch to **`📦 Recent Releases (BigQuery Ledger)`** to view the live records synced directly from BigQuery (`REL-042: cartservice broken-v2`, etc.).
-2. **Trigger an Outage Simulation**: 
-   * In the left sidebar under **`🛠️ Demo & Simulation`**, expand **`🧪 Simulate Outage Scenarios`**.
-   * Select a scenario from the dropdown (e.g. `🟢 gke-scale-outage`, `🟢 gke-bad-rollout`, `🟡 gke-pod-crash`, `🟡 gke-payment-latency`, `🌐 gke-network-firewall-block`, `🌐 gke-dns-outage`, or `🌐 gcp-nat-port-drop`).
-   * Click **`💥 Trigger Simulation`**. The Chaos Engine executes the exact failure on GKE and updates the dashboard status to `DEGRADED ⚠️`.
-3. **Trigger Autonomous Investigation & HITL Approval**: 
-   * Click **`🔍 Trigger Autonomous Investigation`** (or type a query directly into the `💬 NovaSRE AI Companion` chat stream).
-   * **If Tier 1 (Auto-Recovery)**: The agent heals the cluster immediately and confirms recovery.
-   * **If Tier 2 (Manual HITL)**: The UI dynamically renders the **`⚡ Proposed Recovery Action`** confirmation box. Click **`✅ Approve & Execute Action`**. The Remediation Worker executes the fix over A2A, confirms pod readiness, sets the status back to `HEALTHY 🟢`, and compiles the **Markdown Post-Mortem Report** asynchronously in the background.
-4. **Inspect Post-Mortem Reports**: Switch to the **`📑 Compiled Post-Mortem Reports`** tab to view the publication-ready incident report and its GCS archival location.
-
----
-
-### Option B: Test via the Terminal (Direct cURL & REST API Verification)
+### Option A: Test via the Terminal (Direct cURL & REST API Verification)
 
 You can run an end-to-end verification directly from your terminal (`bash`) by querying the serverless Vertex AI Reasoning Engine REST endpoints (`:streamQuery`) using `curl` and your Google Cloud OAuth token. This simulates a complete **Tier 1 Scale Outage (`gke-scale-outage`)** and verifies autonomous self-healing via Agent-to-Agent (`A2A`) delegation.
 
@@ -488,7 +418,7 @@ To add a new autonomous capability, complete three lightweight steps:
 
 1. **Author a Chaos Simulation Skill**: Create a new folder under `app/skills/simulations/<your-new-scenario>/SKILL.md`. Document the exact failure injection routine in readable GitHub Flavored Markdown (e.g., injecting CPU saturation, editing resource limits, or introducing network loss via `kubectl`).
 2. **Author a Remediation Playbook**: Create the corresponding diagnostic SOP under `app/skills/playbooks/<your-new-scenario>/SKILL.md`. Document the target symptoms, causal telemetry indicators, and exact recovery commands (`kubectl`, `gcloud`, etc.). When you run `terraform apply`, this playbook is automatically seeded into your central Google Cloud Storage repository (`GCS_MCP_SERVER`).
-3. **Register in the Control Room & Assign Governance Tier**: Add your new scenario ID to the dropdown selector in `ui/streamlit_app.py` and assign its operational governance policy (Tier 1 for immediate Auto-Remediation or Tier 2 for gated HITL confirmation).
+3. **Assign Governance Tier**: In `app/investigator_agent.py`, update `_RCA_INSTRUCTION` to map the new playbook to either Tier 1 (auto-remediation via `remediation_executor_remote`) or Tier 2 (HITL via `remediation_executor_hitl`).
 
 Once updated, the Vertex AI Reasoning Engines automatically discover, parse, and orchestrate your new skills on demand via their conversational MCP server attachments.
 

@@ -12,8 +12,8 @@ PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "sre-agent-1780845375")
 LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 # URNs of the deployed agents
-INVESTIGATOR_URN = "projects/787608666447/locations/us-central1/reasoningEngines/1070949064465448960"
-REMEDIATION_URN = "projects/787608666447/locations/us-central1/reasoningEngines/2971468107215798272"
+INVESTIGATOR_URN = f"projects/787608666447/locations/{LOCATION}/reasoningEngines/1070949064465448960"
+REMEDIATION_URN = f"projects/787608666447/locations/{LOCATION}/reasoningEngines/2971468107215798272"
 
 def main():
     parser = argparse.ArgumentParser(description="End-to-End Test Runner for 2-Agent SRE Platform")

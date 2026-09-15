@@ -205,8 +205,36 @@ os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
 GEMINI_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+# Separate location for model inference — gemini-3.6-flash is only on the global endpoint.
+# Captured before the RE A2A template overrides GOOGLE_CLOUD_LOCATION to the deployment region.
+GEMINI_MODEL_LOCATION = os.environ.get("GEMINI_MODEL_LOCATION", "global")
 GKE_CLUSTER_NAME = os.environ.get("GKE_CLUSTER_NAME", "online-boutique")
 GKE_CLUSTER_REGION = os.environ.get("GKE_CLUSTER_REGION", GEMINI_LOCATION)
+
+# =========================================================================
+# GLOBAL GEMINI CLIENT — bypasses GOOGLE_CLOUD_LOCATION env var entirely
+# =========================================================================
+# The RE A2A template (vertexai/agent_engines/templates/a2a.py) explicitly sets
+# os.environ["GOOGLE_CLOUD_LOCATION"] = <deployment-region> during set_up(), which
+# overwrites any env-var fix we apply. The genai Client reads this env var at
+# construction time (cached_property), so all model calls end up on the wrong endpoint.
+# Fix: subclass Gemini and override api_client to pass location directly to Client,
+# bypassing env var lookup. This is the ADK-documented approach for custom client config.
+try:
+    from functools import cached_property
+    from google.adk.models.google_llm import Gemini as _BaseGemini
+    from google.genai import Client as _GenaiClient
+
+    class GlobalGemini(_BaseGemini):
+        @cached_property
+        def api_client(self) -> _GenaiClient:
+            return _GenaiClient(
+                vertexai=True,
+                project=PROJECT_ID,
+                location=GEMINI_MODEL_LOCATION,
+            )
+except Exception:
+    GlobalGemini = None
 
 # =========================================================================
 # 3. CENTRALIZED LAZY TOOLSET & DYNAMIC ONEMCP FACTORY

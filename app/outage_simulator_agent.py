@@ -15,7 +15,6 @@
 import os
 import pathlib
 from google.adk.agents import Agent
-from google.adk.models import Gemini
 from google.adk.skills import load_skill_from_dir
 from google.adk.tools import skill_toolset
 from dotenv import load_dotenv
@@ -30,9 +29,9 @@ from app.config import (
     GKE_CLUSTER_REGION,
     GKE_MCP_SERVER,
     get_mcp_toolset,
-    LazyToolset
+    LazyToolset,
+    GlobalGemini,
 )
-from app.investigator_agent import remediation_executor_remote
 
 # =========================================================================
 # CHAOS ENGINE TOOL (execute_chaos_action)
@@ -173,7 +172,7 @@ _simulator_tools = [
 
 outage_simulator = Agent(
     name="outage_simulator",
-    model=Gemini(
+    model=GlobalGemini(
         model=GEMINI_MODEL,
     ),
     instruction=_SIMULATOR_INSTRUCTION,

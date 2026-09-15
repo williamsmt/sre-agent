@@ -54,6 +54,21 @@ def patched_message_to_json(message, *args, **kwargs):
         return json.dumps(message)
 
 json_format.MessageToJson = patched_message_to_json
+
+# Patch ParseDict to ignore unknown proto fields — Vertex AI API returns effectiveIdentity
+# which post-2.1.0 SDKs don't yet have in their ReasoningEngineSpec proto definition.
+_original_parse_dict = json_format.ParseDict
+
+def _patched_parse_dict(js_dict, message, *args, **kwargs):
+    # ignore_unknown_fields is the 3rd positional arg; force it True regardless of caller value
+    args = list(args)
+    if args:
+        args[0] = True
+    else:
+        args = [True]
+    return _original_parse_dict(js_dict, message, *args, **kwargs)
+
+json_format.ParseDict = _patched_parse_dict
 # =========================================================================
 
 # Load environment variables
@@ -157,12 +172,17 @@ def deploy_agent(display_name: str, module_name: str, entrypoint_object: str, en
     sys.path.insert(0, os.getcwd())
     module = importlib.import_module(module_name)
     agent_instance = getattr(module, entrypoint_object)
-    
+    # Re-init after import: app/config.py calls vertexai.init(location="global") for model
+    # inference when imported, which would otherwise cause agent_engines.create() to target
+    # the global endpoint and get an effectiveIdentity parse error from the Vertex AI API.
+    vertexai.init(project=PROJECT_ID, location=LOCATION, staging_bucket=STAGING_BUCKET)
+
     # Setup environment variables
     merged_env_vars = {
         "GOOGLE_CLOUD_REGION": LOCATION,
         "GCP_PROJECT_ID": PROJECT_ID,
         "GEMINI_MODEL": GEMINI_MODEL,
+        "GEMINI_MODEL_LOCATION": os.environ.get("GEMINI_MODEL_LOCATION", "global"),
         "GOOGLE_GENAI_USE_VERTEXAI": "1",
         "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
         "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED": "true",
@@ -229,7 +249,8 @@ def deploy_agent(display_name: str, module_name: str, entrypoint_object: str, en
             "requests>=2.31.0",
             "fastapi>=0.110.0",
             "uvicorn>=0.28.0",
-            "mcp==1.27.2"
+            "mcp==1.27.2",
+            "a2ui-agent-sdk>=0.6.0",
         ],
         extra_packages=["./app"],
         service_account=DEFAULT_SERVICE_ACCOUNT,
@@ -241,21 +262,34 @@ def deploy_agent(display_name: str, module_name: str, entrypoint_object: str, en
 
 def main():
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "rem":
+        rem_app = deploy_agent(display_name="remediation-executor", module_name="app.remediation_agent", entrypoint_object="agent_engine")
+        print(f"\n🚀 Newly deployed Remediation Agent URN: {rem_app.resource_name}")
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "inv":
-        inv_app = deploy_agent(display_name="rca-telemetry-expert", module_name="app.investigator_agent", entrypoint_object="agent_engine")
-        print(f"\n🚀 Newly deployed Investigator Agent URN: {inv_app.resource_name}")
+        vertexai.init(project=PROJECT_ID, location=LOCATION, staging_bucket=STAGING_BUCKET)
+        rem_urn = ""
         try:
-            import subprocess
-            print("\n⚡ Automatically syncing fresh Investigator URN to live Cloud Run service 'novasre-control-room'...")
-            subprocess.run([
-                "gcloud", "run", "services", "update", "novasre-control-room",
-                "--region", LOCATION,
-                "--project", PROJECT_ID,
-                f"--update-env-vars=INVESTIGATOR_AGENT_URN={inv_app.resource_name}"
-            ], check=True)
-            print("✅ Cloud Run service updated successfully with new investigator URN!")
-        except Exception as e:
-            print(f"⚠️ Could not auto-update Cloud Run env var: {e}")
+            for engine in reasoning_engines.ReasoningEngine.list():
+                if engine.display_name == "remediation-executor":
+                    rem_urn = engine.resource_name
+                    break
+        except Exception:
+            pass
+        inv_env = {"REMEDIATION_AGENT_URN": rem_urn} if rem_urn else {}
+        inv_app = deploy_agent(
+            display_name="rca-telemetry-expert",
+            module_name="app.investigator_agent",
+            entrypoint_object="agent_engine",
+            env_vars=inv_env,
+        )
+        print(f"\n🚀 Newly deployed Investigator Agent URN: {inv_app.resource_name}")
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "sim":
+        sim_app = deploy_agent(display_name="outage-simulator", module_name="app.outage_simulator_agent", entrypoint_object="agent_engine")
+        print(f"\n🚀 Newly deployed Outage Simulator URN: {sim_app.resource_name}")
         return
 
     agents_to_deploy = [
@@ -271,7 +305,12 @@ def main():
         for attempt in range(1, 4):
             try:
                 print(f"Deploying {display_name} (Attempt {attempt}/3)...")
-                remote_app = deploy_agent(display_name, module_name, entrypoint)
+                extra_env = {}
+                if display_name == "rca-telemetry-expert":
+                    rem = deployed_urns.get("remediation-executor", "")
+                    if rem:
+                        extra_env = {"REMEDIATION_AGENT_URN": rem}
+                remote_app = deploy_agent(display_name, module_name, entrypoint, env_vars=extra_env)
                 deployed_urns[display_name] = remote_app.resource_name
                 success = True
                 break
@@ -289,21 +328,6 @@ def main():
     
     # Configure IAM roles sequentially
     grant_iam_roles(DEFAULT_SERVICE_ACCOUNT, None)
-
-    # Automatically sync live Cloud Run environment variables to match these fresh URNs right now!
-    try:
-        import subprocess, shutil
-        gcloud_bin = shutil.which("gcloud") or "/usr/local/google/home/madhavikarra/google-cloud-sdk/bin/gcloud"
-        print("\n⚡ Automatically syncing fresh Reasoning Engine URNs to live Cloud Run service 'novasre-control-room'...")
-        subprocess.run([
-            gcloud_bin, "run", "services", "update", "novasre-control-room",
-            "--region", LOCATION,
-            "--project", PROJECT_ID,
-            f"--update-env-vars=REMEDIATION_AGENT_URN={deployed_urns.get('remediation-executor')},OUTAGE_SIMULATOR_URN={deployed_urns.get('outage-simulator')},INVESTIGATOR_AGENT_URN={deployed_urns.get('rca-telemetry-expert')}"
-        ], check=True)
-        print("✅ Cloud Run service 'novasre-control-room' updated successfully with new agent URNs!")
-    except Exception as e:
-        print(f"⚠️ Could not auto-update Cloud Run env vars (please check permissions or update manually): {e}")
 
 if __name__ == "__main__":
     main()

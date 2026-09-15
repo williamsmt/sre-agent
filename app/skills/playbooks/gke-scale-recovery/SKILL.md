@@ -11,5 +11,5 @@ description: Playbook 1 (Tier 1 Auto-Recovery) — Use when a GKE deployment (li
 
 ## Remediation Action (Tier 1 - Fast-Path Auto-Recovery)
 1. You are pre-approved to **automatically scale the resource back up to its target replica count** (`1`).
-2. Call `remediation_executor_remote("scale deployment frontend in namespace default to 1 replica in cluster online-boutique in region us-central1")` automatically.
+2. Call `remediation_executor_remote("scale deployment frontend in namespace default to 1 replica in cluster online-boutique")` automatically.
 3. Verify that `status.readyReplicas` returns to `1/1` and report `SUCCESS`.

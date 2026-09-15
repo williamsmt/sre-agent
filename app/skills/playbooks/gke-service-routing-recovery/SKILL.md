@@ -11,5 +11,5 @@ description: Playbook 8 (Tier 2 HITL Approval) — Use when GKE service routing 
 
 ## Remediation Action (Tier 2 - HITL Approval Required)
 1. Present the recommended service selector restoration plan to the human operator: `"Restore GKE Service 'checkoutservice' selector in namespace 'default' to target pods with label 'app=checkoutservice'."`
-2. Upon operator approval (`APPROVED`), call `remediation_executor_remote("apply k8s manifest to update service checkoutservice selector to app=checkoutservice in namespace default in cluster online-boutique in region us-central1")`.
+2. Upon operator approval (`APPROVED`), call `remediation_executor_remote("apply k8s manifest to update service checkoutservice selector to app=checkoutservice in namespace default in cluster online-boutique")`.
 3. Verify that Pod-to-Pod connectivity is restored and report `SUCCESS`.

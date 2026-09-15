@@ -14,7 +14,7 @@ You are executing a controlled **Chaos Engineering / Outage Simulation** on GKE 
 * **Cluster**: `online-boutique`
 
 ## Simulation Instructions
-1. When asked to execute the `gke-bad-rollout` simulation, you must update the container image of `cartservice` to an invalid or broken tag (`us-central1-docker.pkg.dev/google-samples/microservices-demo/cartservice:broken-v2`).
+1. When asked to execute the `gke-bad-rollout` simulation, you must update the container image of `cartservice` to an invalid or broken tag (`cartservice:broken-v2` from the microservices-demo registry).
 2. Call your `execute_chaos_action` tool with arguments: `action_type="rollout"`, `resource_name="cartservice"`, `namespace="default"`.
 3. This triggers Kubernetes to attempt a rolling update where new replacement pods enter `CrashLoopBackOff` or `ErrImagePull`.
 4. Output a clear confirmation brief: `"OUTAGE SIMULATION SUCCESSFUL: GKE Deployment 'cartservice' updated to broken image revision. Pod CrashLoop condition triggered."`

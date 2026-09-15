@@ -15,7 +15,6 @@
 import os
 from google.adk.agents import Agent
 from google.adk.apps import App
-from google.adk.models import Gemini
 from dotenv import load_dotenv
 
 # Load environment variables & trigger centralized runtime patches from config
@@ -29,7 +28,8 @@ from app.config import (
     GKE_MCP_SERVER,
     COMPUTE_MCP_SERVER,
     get_mcp_toolset,
-    LazyToolset
+    LazyToolset,
+    GlobalGemini,
 )
 
 # =========================================================================
@@ -71,7 +71,7 @@ _remediation_tools = [
 
 remediation_executor = Agent(
     name="remediation_executor",
-    model=Gemini(
+    model=GlobalGemini(
         model=GEMINI_MODEL,
     ),
     instruction=_REMEDIATION_INSTRUCTION,
@@ -100,6 +100,12 @@ def _get_remediation_agent_card():
     )
 
 def build_remediation_executor():
+    import vertexai
+    from app.config import PROJECT_ID, GEMINI_MODEL_LOCATION
+    # RE framework resets vertexai.global_config to us-east1 before each request;
+    # re-init here (inside agent_executor_builder) so model calls use the global endpoint.
+    vertexai.init(project=PROJECT_ID, location=GEMINI_MODEL_LOCATION)
+
     from google.adk.artifacts.in_memory_artifact_service import InMemoryArtifactService
     from google.adk.sessions.in_memory_session_service import InMemorySessionService
     from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
