@@ -212,6 +212,26 @@ GKE_CLUSTER_NAME = os.environ.get("GKE_CLUSTER_NAME", "online-boutique")
 GKE_CLUSTER_REGION = os.environ.get("GKE_CLUSTER_REGION", GEMINI_LOCATION)
 
 # =========================================================================
+# PRIVILEGED ACCESS MANAGER (PAM) — JIT elevation for remediation
+# =========================================================================
+# The remediator requests a temporary (JIT) PAM grant against this entitlement
+# before executing a privileged action. The entitlement's eligibleUsers must
+# include the remediator's service account, and it auto-approves (no approval
+# workflow), so the grant reaches ACTIVE without human review. The operator's
+# a2ui justification is forwarded and recorded as the grant's justification.
+PAM_ENABLED = os.environ.get("PAM_ENABLED", "true").lower() in ("1", "true", "yes")
+PAM_ENTITLEMENT_NAME = os.environ.get(
+    "PAM_ENTITLEMENT_NAME",
+    f"projects/{PROJECT_ID}/locations/global/entitlements/gke-editor",
+)
+# Requested grant window in seconds. The gke-editor entitlement enforces BOTH a floor and a
+# ceiling: the duration must be > 30m (1800s) and <= maxRequestDuration (3600s). 600s was
+# rejected with "Requested duration should be greater than 30m0s", so we default to the max.
+PAM_GRANT_DURATION_SECONDS = int(os.environ.get("PAM_GRANT_DURATION_SECONDS", "3600"))
+# How long to poll for the grant to reach ACTIVE before proceeding anyway.
+PAM_GRANT_ACTIVE_TIMEOUT_SECONDS = int(os.environ.get("PAM_GRANT_ACTIVE_TIMEOUT_SECONDS", "60"))
+
+# =========================================================================
 # GLOBAL GEMINI CLIENT — bypasses GOOGLE_CLOUD_LOCATION env var entirely
 # =========================================================================
 # The RE A2A template (vertexai/agent_engines/templates/a2a.py) explicitly sets

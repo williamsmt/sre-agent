@@ -30,7 +30,106 @@ from app.config import (
     get_mcp_toolset,
     LazyToolset,
     GlobalGemini,
+    PAM_ENABLED,
+    PAM_ENTITLEMENT_NAME,
+    PAM_GRANT_DURATION_SECONDS,
+    PAM_GRANT_ACTIVE_TIMEOUT_SECONDS,
 )
+
+# =========================================================================
+# PAM JIT ELEVATION (before_agent_callback)
+# =========================================================================
+# Before the remediator touches GKE/GCP, it requests a temporary PAM grant so the
+# privileged access is JIT and auditable. The operator's justification arrives in-band
+# as a `[PAM_JUSTIFICATION]:` trailer on the request text (forwarded by the RCA agent);
+# if absent we synthesize a Tier-1 default (D6) so the audit trail is never empty.
+#
+# The PAM grant elevates the identity that CALLS create_grant — which is this remediator's
+# own service account (the entitlement's sole eligibleUser) — so the call MUST run here.
+#
+# Per D3, standing roles/container.developer is retained for now, so PAM is additive/
+# audit-only: a grant failure is logged loudly but does NOT block healing. Once the
+# standing role is removed (in Terraform), this becomes the hard gate.
+_PAM_JUSTIFICATION_MARKER = "[PAM_JUSTIFICATION]:"
+_PAM_TIER1_DEFAULT = (
+    "Automated SRE remediation initiated by remediation_executor; no operator justification "
+    "was supplied. JIT elevation requested to execute an approved healing action."
+)
+
+def _extract_pam_justification(content) -> str:
+    """Pull the operator justification out of the inbound request's [PAM_JUSTIFICATION]: trailer."""
+    if not content or not getattr(content, "parts", None):
+        return ""
+    blobs = []
+    for part in content.parts:
+        text = getattr(part, "text", None)
+        if text:
+            blobs.append(text)
+        inline = getattr(part, "inline_data", None)
+        if inline is not None and getattr(inline, "data", None):
+            raw = inline.data
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", "ignore")
+            blobs.append(str(raw))
+    for blob in blobs:
+        idx = blob.find(_PAM_JUSTIFICATION_MARKER)
+        if idx != -1:
+            return blob[idx + len(_PAM_JUSTIFICATION_MARKER):].strip()
+    return ""
+
+def _request_pam_grant_sync(justification: str, logger) -> None:
+    """Create a JIT PAM grant and poll until ACTIVE. Blocking; run via asyncio.to_thread."""
+    import time
+    from google.cloud import privilegedaccessmanager_v1 as pam
+
+    client = pam.PrivilegedAccessManagerClient()
+    grant = pam.Grant()
+    grant.requested_duration = {"seconds": PAM_GRANT_DURATION_SECONDS}
+    grant.justification.unstructured_justification = justification[:4000]
+
+    logger.info(
+        "[pam] requesting JIT grant on %s (duration=%ss) justification=%r",
+        PAM_ENTITLEMENT_NAME, PAM_GRANT_DURATION_SECONDS, justification[:200],
+    )
+    created = client.create_grant(parent=PAM_ENTITLEMENT_NAME, grant=grant)
+    logger.info("[pam] grant created: %s (state=%s)", created.name, created.state.name)
+
+    terminal_bad = {
+        pam.Grant.State.DENIED, pam.Grant.State.ACTIVATION_FAILED, pam.Grant.State.REVOKED,
+        pam.Grant.State.EXPIRED, pam.Grant.State.ENDED, pam.Grant.State.WITHDRAWN,
+    }
+    state, name = created.state, created.name
+    deadline = time.time() + PAM_GRANT_ACTIVE_TIMEOUT_SECONDS
+    while state != pam.Grant.State.ACTIVE and state not in terminal_bad and time.time() < deadline:
+        time.sleep(2)
+        state = client.get_grant(name=name).state
+    if state == pam.Grant.State.ACTIVE:
+        logger.info("[pam] ✅ JIT grant ACTIVE: %s", name)
+    else:
+        logger.warning(
+            "[pam] ⚠️ grant %s did not reach ACTIVE (state=%s); proceeding on standing role (D3)",
+            name, state.name,
+        )
+
+async def _pam_grant_callback(callback_context):
+    """before_agent_callback: obtain a JIT PAM grant before the remediator executes.
+
+    Non-blocking on failure (D3): logs and returns None so healing proceeds on the
+    standing role. Returns None always — never short-circuits the agent.
+    """
+    import asyncio
+    import logging
+    logger = logging.getLogger("google_adk")
+
+    if not PAM_ENABLED:
+        return None
+
+    justification = _extract_pam_justification(callback_context.user_content) or _PAM_TIER1_DEFAULT
+    try:
+        await asyncio.to_thread(_request_pam_grant_sync, justification, logger)
+    except Exception as e:
+        logger.warning("[pam] ⚠️ JIT grant request failed: %s; proceeding on standing role (D3)", e)
+    return None
 
 # =========================================================================
 # AGENT: The Secure Healing Worker (remediation_executor)
@@ -76,6 +175,7 @@ remediation_executor = Agent(
     ),
     instruction=_REMEDIATION_INSTRUCTION,
     tools=_remediation_tools,
+    before_agent_callback=_pam_grant_callback,
 )
 
 # =========================================================================
