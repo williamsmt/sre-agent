@@ -945,6 +945,22 @@ wheels = [
 ]
 
 [[package]]
+name = "google-cloud-privilegedaccessmanager"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/53/f8c36758d91d33faf3e205d93cb99e4a328434dc857e810f04a1f6f284d4/google_cloud_privilegedaccessmanager-0.4.1.tar.gz", hash = "sha256:f0da4e36d98d69565f0607d855e44fd332876df0d7647ed195449aff2199672d", size = 110752, upload-time = "2026-06-22T23:22:17.502Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/66/9c97fd8f4fa77d73da83e0c8b1a92ce3047ed9179717c7bc3875c2d82212/google_cloud_privilegedaccessmanager-0.4.1-py3-none-any.whl", hash = "sha256:f409de15fec855f709d648464440464ef2cacdc757d6926c5077bb4c28c57fe3", size = 87602, upload-time = "2026-06-22T23:20:13.153Z" },
+]
+
+[[package]]
 name = "google-cloud-resource-manager"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2431,6 +2447,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "google-adk", extra = ["agent-identity"] },
     { name = "google-cloud-aiplatform", extra = ["agent-engines"] },
+    { name = "google-cloud-privilegedaccessmanager" },
     { name = "google-genai" },
     { name = "mcp" },
     { name = "pydantic" },
@@ -2450,6 +2467,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "google-adk", extras = ["agent-identity"], specifier = ">=0.1.0" },
     { name = "google-cloud-aiplatform", extras = ["agent-engines"], specifier = ">=1.130.0" },
+    { name = "google-cloud-privilegedaccessmanager", specifier = ">=0.4.1" },
     { name = "google-genai", specifier = ">=1.75.0" },
     { name = "mcp" },
     { name = "pydantic", specifier = ">=2.0.0" },

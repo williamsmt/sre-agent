@@ -219,12 +219,14 @@ You are the SRE RCA Telemetry Expert (rca_telemetry_expert), an elite autonomous
 }}
 """
 
-async def remediation_executor_remote(request: str) -> str:
+async def remediation_executor_remote(request: str, justification: str = "") -> str:
     """Tier 1 Auto-Recovery: delegate a GKE remediation immediately without operator approval.
     Use this tool for Playbooks 1 & 2 only (scale-recovery, crashloop-rollback).
 
     Args:
         request: The SRE instruction describing the GKE remediation or rollback action to execute (e.g. "scale deployment frontend in namespace default to 1 replica").
+        justification: Optional operator justification (from the HITL Approve click) forwarded
+            to the remediator as a `[PAM_JUSTIFICATION]:` trailer so it can request a PAM grant.
 
     Returns:
         A string describing the execution result of the GKE remediation action.
@@ -341,9 +343,16 @@ async def remediation_executor_remote(request: str) -> str:
         agent=agent
     )
     
+    # Forward the operator justification (if any) as a trailer the remediator's PAM
+    # callback parses out to request a JIT grant. Kept in-band on the request text so
+    # it rides the existing A2A message path with no protocol change.
+    outbound = request
+    if justification and justification.strip():
+        outbound = f"{request}\n\n[PAM_JUSTIFICATION]: {justification.strip()}"
+
     session.events.append(ADKEvent(
         author="user",
-        content=genai_types.Content(parts=[genai_types.Part(text=request)]),
+        content=genai_types.Content(parts=[genai_types.Part(text=outbound)]),
         invocation_id=ctx.invocation_id
     ))
     
@@ -366,23 +375,43 @@ def _build_hitl_a2ui_messages(request: str) -> list:
     # terminal beginRendering signal — the client buffers components and only
     # renders when beginRendering (referencing `root`) arrives. Emitting
     # beginRendering first leaves GE with an empty buffer and it fails to render.
+    #
+    # PHASE 0 (PAM justification spike): a TextField bound two-way to the data-model
+    # path /justification captures the operator's justification. The Approve button's
+    # action.context references that same path, so the client resolves the typed value
+    # and ships it back inside the userAction click payload. dataModelUpdate seeds the
+    # path before render so the binding exists.
+    #
+    # STATELESS DESIGN: because pending_remediation session state does NOT survive
+    # between the render turn and the click turn on a multi-instance Reasoning Engine,
+    # the Approve button also carries the full remediation `request` as a literalString
+    # in action.context. This makes the click payload self-contained — the interceptor
+    # reconstructs both the action AND the request+justification directly from the click,
+    # with no dependency on session state. The [hitl][phase0] capture log dumps the raw
+    # inbound payload so we can pin the exact context shape before finalizing the parser.
     return [
         {
             "surfaceUpdate": {
                 "surfaceId": sid,
                 "components": [
                     {"id": "root",    "component": {"Card":   {"child": "content"}}},
-                    {"id": "content", "component": {"Column": {"children": {"explicitList": ["title", "desc", "actions"]}}}},
+                    {"id": "content", "component": {"Column": {"children": {"explicitList": ["title", "desc", "justification", "actions"]}}}},
                     {"id": "title",   "component": {"Text":   {"text": {"literalString": "Remediation Approval Required"}}}},
                     {"id": "desc",    "component": {"Text":   {"text": {"literalString": request}}}},
+                    {"id": "justification", "component": {"TextField": {
+                        "label": {"literalString": "Justification (required for privileged access)"},
+                        "text": {"path": "/justification"},
+                        "textFieldType": "longText",
+                    }}},
                     {"id": "actions", "component": {"Row":    {"children": {"explicitList": ["approve-btn", "reject-btn"]}}}},
-                    {"id": "approve-btn",   "component": {"Button": {"child": "approve-label", "primary": True,  "action": {"name": "approve"}}}},
+                    {"id": "approve-btn",   "component": {"Button": {"child": "approve-label", "primary": True,  "action": {"name": "approve", "context": [{"key": "justification", "value": {"path": "/justification"}}, {"key": "remediation_request", "value": {"literalString": request}}]}}}},
                     {"id": "approve-label", "component": {"Text":   {"text": {"literalString": "Approve"}}}},
                     {"id": "reject-btn",    "component": {"Button": {"child": "reject-label",  "primary": False, "action": {"name": "reject"}}}},
                     {"id": "reject-label",  "component": {"Text":   {"text": {"literalString": "Reject"}}}},
                 ],
             }
         },
+        {"dataModelUpdate": {"surfaceId": sid, "path": "/", "contents": [{"key": "justification", "valueString": ""}]}},
         {"beginRendering": {"surfaceId": sid, "root": "root"}},
     ]
 
@@ -454,6 +483,95 @@ def _find_action_name(obj):
                 return found
     return None
 
+def _find_user_action(obj):
+    """Recursively locate the A2UI userAction dict (has a string 'name', optional 'context')."""
+    if isinstance(obj, dict):
+        for key in ("userAction", "action"):
+            sub = obj.get(key)
+            if isinstance(sub, dict) and isinstance(sub.get("name"), str):
+                return sub
+        name = obj.get("name")
+        if isinstance(name, str) and name.strip().lower() in ("approve", "reject"):
+            return obj
+        for value in obj.values():
+            found = _find_user_action(value)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = _find_user_action(value)
+            if found:
+                return found
+    return None
+
+def _extract_hitl_click(content):
+    """Extract (action, remediation_request, justification) from a GE A2UI Approve/Reject click.
+
+    STATELESS: everything needed to resolve the approval rides in the click payload, so this
+    does NOT depend on pending_remediation session state surviving between turns.
+
+    GE delivers the click as a userAction DataPart (wrapped in <a2a_datapart_json>). The
+    button's action.context — which we sent as an array of {key,value} — is resolved by the
+    client into a {key: value} MAP inside userAction.context. Empirically confirmed GE quirk:
+    a context entry whose value was a path binding (our /justification field) comes back with
+    its KEY mangled to the JS string "[object Object]" while the resolved VALUE is intact;
+    literalString-valued entries (remediation_request) keep their real key. We parse around
+    that, and also tolerate the original array form in case a future GE build changes.
+
+    Returns ("", "", "") on non-HITL turns.
+    """
+    import json
+    if not content or not getattr(content, "parts", None):
+        return "", "", ""
+    blobs = []
+    for part in content.parts:
+        text = getattr(part, "text", None)
+        if text:
+            blobs.append(text)
+        inline = getattr(part, "inline_data", None)
+        if inline is not None and getattr(inline, "data", None):
+            raw = inline.data
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", "ignore")
+            blobs.append(str(raw).replace("<a2a_datapart_json>", "").replace("</a2a_datapart_json>", ""))
+    for blob in blobs:
+        stripped = blob.strip().lower()
+        if stripped in ("approve", "reject"):
+            return stripped, "", ""
+        try:
+            parsed = json.loads(blob)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        ua = _find_user_action(parsed)
+        if not ua:
+            continue
+        action = str(ua.get("name", "")).strip().lower()
+        if action not in ("approve", "reject"):
+            continue
+        context = ua.get("context") or {}
+        request, justification = "", ""
+        if isinstance(context, dict):
+            request = context.get("remediation_request") or ""
+            justification = context.get("justification") or context.get("[object Object]") or ""
+            if not justification:
+                # last resort: any string context value that isn't the request
+                for k, v in context.items():
+                    if k != "remediation_request" and isinstance(v, str) and v:
+                        justification = v
+                        break
+        elif isinstance(context, list):
+            for entry in context:
+                if not isinstance(entry, dict):
+                    continue
+                k, v = entry.get("key"), entry.get("value")
+                v = v if isinstance(v, str) else ""
+                if k == "remediation_request":
+                    request = v or request
+                elif k == "justification":
+                    justification = v or justification
+        return action, str(request), str(justification)
+    return "", "", ""
+
 def _extract_hitl_action(content) -> str:
     """Extract 'approve'/'reject' from a GE A2UI button-click message.
 
@@ -500,29 +618,38 @@ async def _hitl_action_interceptor(callback_context):
     import logging
     logger = logging.getLogger("google_adk")
 
-    pending = callback_context.state.get("pending_remediation")
-    action = _extract_hitl_action(callback_context.user_content)
-    if not pending or action not in ("approve", "reject"):
-        if pending:
-            parts_summary = [
-                {"text": getattr(p, "text", None),
-                 "inline_mime": getattr(getattr(p, "inline_data", None), "mime_type", None)}
-                for p in (getattr(callback_context.user_content, "parts", None) or [])
-            ]
-            logger.warning(
-                "[hitl] pending remediation set but no approve/reject action extracted; incoming parts: %s",
-                parts_summary,
-            )
+    # STATELESS resolution: the Approve/Reject click carries the action, the full
+    # remediation_request, and the operator justification in its userAction.context, so
+    # we resolve entirely from the click payload and never depend on pending_remediation
+    # surviving between the render turn and the click turn (which is unreliable across
+    # multi-instance Reasoning Engine routing).
+    action, request, justification = _extract_hitl_click(callback_context.user_content)
+
+    if action not in ("approve", "reject"):
         return None
 
+    logger.info(
+        "[hitl] resolved operator action=%r via stateless click payload (request=%r, justification_len=%d)",
+        action, request, len(justification or ""),
+    )
+
     callback_context.state["pending_remediation"] = ""
-    if action == "approve":
-        result = await remediation_executor_remote(pending)
-        text = f"✅ Operator approved. Remediation executed: {result}"
-    else:
-        text = "🛑 Operator rejected the remediation. No action taken."
-    logger.info("[hitl] resolved operator action '%s' deterministically via before_agent_callback", action)
-    return genai_types.Content(role="model", parts=[genai_types.Part(text=text)])
+    if action == "reject":
+        return genai_types.Content(role="model", parts=[genai_types.Part(
+            text="🛑 Operator rejected the remediation. No action taken.")])
+
+    # approve — prefer the request from the click; fall back to session state only if an
+    # older/context-less click omitted it.
+    if not request:
+        request = callback_context.state.get("pending_remediation") or ""
+    if not request:
+        logger.warning("[hitl] approve click carried no remediation_request and no pending state was available")
+        return genai_types.Content(role="model", parts=[genai_types.Part(
+            text="⚠️ Approval received but the remediation request was missing from the click payload. Please re-run the investigation and approve again.")])
+
+    result = await remediation_executor_remote(request, justification)
+    return genai_types.Content(role="model", parts=[genai_types.Part(
+        text=f"✅ Operator approved. Remediation executed: {result}")])
 
 def get_current_utc_time() -> str:
     """Returns the current UTC date and time as an ISO 8601 string (e.g. 2026-07-18T06:56:00Z). Use this tool to get current timestamps for log and metric filtering queries."""

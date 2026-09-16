@@ -8,6 +8,7 @@ dependencies = [
     "google-adk[agent-identity]>=0.1.0",
     "google-genai>=1.75.0",
     "google-cloud-aiplatform[agent-engines]>=1.130.0",
+    "google-cloud-privilegedaccessmanager>=0.4.1",
     "a2a-sdk>=0.3.26,<1.0.0",
     "python-dotenv>=1.0.1",
     "pydantic>=2.0.0",
