@@ -25,6 +25,38 @@ wheels = [
 ]
 
 [[package]]
+name = "a2ui-agent-sdk"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "a2a-sdk" },
+    { name = "a2ui-core" },
+    { name = "antlr4-python3-runtime" },
+    { name = "google-adk" },
+    { name = "google-genai" },
+    { name = "httpx" },
+    { name = "jsonschema" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/28/b7/3e078475121e9e048eba3aeac9c789256a886e12d3ebfe6870e4d8d8a5c0/a2ui_agent_sdk-0.6.0.tar.gz", hash = "sha256:306e0d5a518a9c238b04def18b267546bc5e704015c1a7d1475d1d2357aa677c", size = 232765, upload-time = "2026-09-11T02:14:26.669Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/c4/f7b0dc370b41f88ce338bc659dd304e64ee641e8c13f917de63439621905/a2ui_agent_sdk-0.6.0-py3-none-any.whl", hash = "sha256:23d2d92cc8b9d350e3fda060c9343c908bf5ae8dbb38bd418ca06f73006d78da", size = 218008, upload-time = "2026-09-11T02:14:25.264Z" },
+]
+
+[[package]]
+name = "a2ui-core"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "pydantic" },
+    { name = "referencing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d9/51/477ea2d173f77d54f1a3b963fafc811a228427d077442bc7b6cc7409787d/a2ui_core-0.1.1.tar.gz", hash = "sha256:591df9357cd84a3ccf409132a741eb1fbb060be73de0eebb3dcfdd4c7b33180d", size = 84241, upload-time = "2026-07-08T03:49:36.958Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/14/2344f6edc4b381db477d4387a28d1c84a56614962cc16f55074be981a12a/a2ui_core-0.1.1-py3-none-any.whl", hash = "sha256:8857e1942b8b1bab530efa0c20f6f9048c5771b47b3b98b3bc1ca28d39480069", size = 75389, upload-time = "2026-07-08T03:49:35.698Z" },
+]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.2"
 source = { registry = "https://pypi.org/simple" }
@@ -208,6 +240,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ee/67/531ea369ba64dcff5ec9c3402f9f51bf748cec26dde048a2f973a4eea7f5/annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89", size = 16081, upload-time = "2024-05-20T21:33:25.928Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/78/b6/6307fbef88d9b5ee7421e68d78a9f162e0da4900bc5f5793f6d3d0e34fb8/annotated_types-0.7.0-py3-none-any.whl", hash = "sha256:1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53", size = 13643, upload-time = "2024-05-20T21:33:24.1Z" },
+]
+
+[[package]]
+name = "antlr4-python3-runtime"
+version = "4.13.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/5f/2cdf6f7aca3b20d3f316e9f505292e1f256a32089bd702034c29ebde6242/antlr4_python3_runtime-4.13.2.tar.gz", hash = "sha256:909b647e1d2fc2b70180ac586df3933e38919c85f98ccc656a96cd3f25ef3916", size = 117467, upload-time = "2024-08-03T19:00:12.757Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/03/a851e84fcbb85214dc637b6378121ef9a0dd61b4c65264675d8a5c9b1ae7/antlr4_python3_runtime-4.13.2-py3-none-any.whl", hash = "sha256:fe3835eb8d33daece0e799090eda89719dbccee7aa39ef94eed3818cafa5a7e8", size = 144462, upload-time = "2024-08-03T19:00:11.134Z" },
 ]
 
 [[package]]
@@ -2444,6 +2485,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
+    { name = "a2ui-agent-sdk" },
     { name = "fastapi" },
     { name = "google-adk", extra = ["agent-identity"] },
     { name = "google-cloud-aiplatform", extra = ["agent-engines"] },
@@ -2464,6 +2506,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "a2a-sdk", specifier = ">=0.3.26,<1.0.0" },
+    { name = "a2ui-agent-sdk", specifier = ">=0.6.0" },
     { name = "fastapi", specifier = ">=0.110.0" },
     { name = "google-adk", extras = ["agent-identity"], specifier = ">=0.1.0" },
     { name = "google-cloud-aiplatform", extras = ["agent-engines"], specifier = ">=1.130.0" },

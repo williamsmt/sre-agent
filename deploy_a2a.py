@@ -236,6 +236,7 @@ def deploy_agent(display_name: str, module_name: str, entrypoint_object: str, en
             "kubernetes==36.0.2",
             "google-cloud-container==2.65.0",
             "google-cloud-privilegedaccessmanager==0.4.1",
+            "a2ui-agent-sdk>=0.6.0",
             "requests>=2.31.0",
             "fastapi>=0.110.0",
             "uvicorn>=0.28.0",
