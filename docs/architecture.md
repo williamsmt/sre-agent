@@ -10,10 +10,8 @@ To achieve enterprise-grade reliability, zero-day diagnostic depth, and rigid se
 
 ```mermaid
 graph TD
-    subgraph SRE Control Room [UI & Orchestration: novasre-control-room on Cloud Run]
-        UI[Streamlit Web Portal & AI Companion<br/>HITL Approval & Routing]
-        LedgerUI[Recent Releases Tab<br/>BigQuery Deployment Ledger View]
-        ReportUI[Post-Mortem Tab<br/>Async Incident Reports View]
+    subgraph Gemini Enterprise [Operator Front Door: Gemini Enterprise]
+        GE[Gemini Enterprise Console<br/>Natural-Language Chat, Routing<br/>& A2UI Human-in-the-Loop Approval]
     end
 
     subgraph Vertex AI Reasoning Engines [Google Cloud Vertex AI Serverless Agents]
@@ -47,16 +45,14 @@ graph TD
         GCS[GCS Bucket<br/>gs://project-telemetry & Playbooks]
     end
 
-    %% UI & Agent Interactions
-    UI <-->|1. Trigger Alert / Natural Chat| InvAgent
-    UI -->|2. Trigger Controlled Scenario| SimAgent
-    UI -->|3. HITL Operator Approval| InvAgent
-    LedgerUI <-->|Live Query| BQ
-    ReportUI <-->|Read Markdown Post-Mortems| GCS
+    %% Gemini Enterprise & Agent Interactions
+    GE <-->|1. Trigger Alert / Natural Chat| InvAgent
+    GE -->|2. Trigger Controlled Scenario| SimAgent
+    GE -->|3. HITL Operator Approval| InvAgent
 
     %% Agent-to-Agent (A2A) and Worker Delegation
     InvAgent -->|A2A Protocol: Execute Approved Healing| RemAgent
-    UI -.->|Async Background Thread| DocAgent
+    InvAgent -.->|Async Post-Mortem Compilation| DocAgent
 
     %% Skills Association
     InvAgent --- DiagSkills
@@ -119,10 +115,10 @@ Compiling detailed post-mortem documentation should never block an SRE operator 
 
 | Pillar | Agent Name & URN | Trust Boundary & IAM Scope | Core Embedded Skills & Capabilities | Primary Invocation Mode |
 | :--- | :--- | :--- | :--- | :--- |
-| **Investigation** | `rca_telemetry_expert` | **Read-Only Trust Boundary**<br>(`viewer`, `logging.viewer`, `monitoring.viewer`, `cloudtrace.viewer`, `errorreporting.viewer`) | Unified Application & Network Diagnostics (`investigation-entrypoint`, `gcp-logging`, `gcp-monitoring`, `sre-correlation`, `gke-workloads`, `google-cloud-networking-observability`, `gke-networking`, `google-cloud-global-frontend-configuration`, `gcp-trace`, `gcp-error-reporting`) + all 8 Recovery Playbooks. | Direct conversational invocation from Control Room UI or Supervisor. |
-| **Remediation** | `remediation_executor` | **Mutating Trust Boundary**<br>(`container.developer`, `compute.networkAdmin`) | Declarative GKE workload patching, image rollbacks, rolling restarts, CoreDNS scaling, NetworkPolicy unblocking, Service selector restoration, and Cloud NAT gateway updates. | Secure A2A delegation from Investigator or HITL Approval Card callback. |
+| **Investigation** | `rca_telemetry_expert` | **Read-Only Trust Boundary**<br>(`viewer`, `logging.viewer`, `monitoring.viewer`, `cloudtrace.viewer`, `errorreporting.viewer`) | Unified Application & Network Diagnostics (`investigation-entrypoint`, `gcp-logging`, `gcp-monitoring`, `sre-correlation`, `gke-workloads`, `google-cloud-networking-observability`, `gke-networking`, `google-cloud-global-frontend-configuration`, `gcp-trace`, `gcp-error-reporting`) + all 8 Recovery Playbooks. | Direct conversational invocation from Gemini Enterprise or Supervisor. |
+| **Remediation** | `remediation_executor` | **Mutating Trust Boundary**<br>(`container.developer`, `compute.networkAdmin`) | Declarative GKE workload patching, image rollbacks, rolling restarts, CoreDNS scaling, NetworkPolicy unblocking, Service selector restoration, and Cloud NAT gateway updates. | Secure A2A delegation from Investigator or HITL approval-widget callback. |
 | **Documentation** | `incident_report_writer` | **Reporting Boundary**<br>(`storage.objectAdmin` on telemetry bucket) | Automated Markdown compilation (`postmortem-generator`, `postmortem-documentation`, `postmortem-aggregator`), log-derived timeline extraction, and GCS object archival. | **Asynchronous Non-Blocking Trigger** spawned upon remediation verification. |
-| **Chaos Engine** | `outage_simulator` | **Simulation Sandbox Boundary**<br>(`container.developer` on target namespace) | Controlled synthetic fault injection (`gke-scale-outage`, `gke-bad-rollout`, `gke-pod-crash`, `gke-payment-latency`, `gke-network-firewall-block`, `gke-dns-outage`, `gcp-nat-port-drop`, `gke-service-routing-break`). | Explicit user click via UI Demo & Simulation drawer or terminal command. |
+| **Chaos Engine** | `outage_simulator` | **Simulation Sandbox Boundary**<br>(`container.developer` on target namespace) | Controlled synthetic fault injection (`gke-scale-outage`, `gke-bad-rollout`, `gke-pod-crash`, `gke-payment-latency`, `gke-network-firewall-block`, `gke-dns-outage`, `gcp-nat-port-drop`, `gke-service-routing-break`). | Explicit conversational invocation from Gemini Enterprise or terminal command. |
 
 ---
 
@@ -135,14 +131,14 @@ When an issue occurs that matches pre-approved low-risk SOPs (such as stateless 
 sequenceDiagram
     autonumber
     actor SRE as SRE Operator / Alert
-    participant UI as Control Room UI
+    participant GE as Gemini Enterprise
     participant INV as Investigator (rca_telemetry_expert)
     participant MCP as Universal OneMCP Layer
     participant REM as Remediation Worker (remediation_executor A2A)
     participant DOC as Incident Report Writer (incident_report_writer)
 
-    SRE->>UI: Query Alert (e.g., "frontend active replicas = 0")
-    UI->>INV: Invoke Investigator Engine via REST / Stream Query
+    SRE->>GE: Query Alert (e.g., "frontend active replicas = 0")
+    GE->>INV: Invoke Investigator Engine via A2A / Stream Query
     INV->>MCP: Interrogate LOGGING_MCP & MONITORING_MCP
     MCP-->>INV: Return HTTP 503 error rates & replica count 0
     INV->>MCP: Query BQ_MCP & GCS_MCP for RAG Playbook
@@ -152,43 +148,43 @@ sequenceDiagram
     REM->>MCP: Execute mutating kubectl via GKE_MCP & verify Pod Ready
     MCP-->>REM: Confirm Pod status: Running (Ready 1/1)
     REM-->>INV: Return validated recovery brief
-    INV-->>UI: Stream formatted 3-part executive summary & JSON facts
-    UI->>DOC: ⚡ Trigger Async PostMortem Thread (Non-Blocking)
-    Note right of UI: SRE Operator immediately free to continue operations
+    INV-->>GE: Stream formatted 3-part executive summary & JSON facts
+    INV->>DOC: ⚡ Trigger Async PostMortem Thread (Non-Blocking)
+    Note right of GE: SRE Operator immediately free to continue operations
     DOC->>MCP: Compile report & archive to GCS_MCP (Zero Telemetry API Calls)
 ```
 
 ---
 
 ### Sequence 2: Gated Human-in-the-Loop Remediation (Tier 2 & Network Configuration)
-When an anomaly requires stateful disruption, resource quota adjustments, or complex firewall / Cloud NAT rule changes, the Investigator halts execution at the trust boundary and renders an interactive HITL Approval Card:
+When an anomaly requires stateful disruption, resource quota adjustments, or complex firewall / Cloud NAT rule changes, the Investigator halts execution at the trust boundary and renders an interactive A2UI HITL approval widget in Gemini Enterprise:
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor SRE as SRE Operator
-    participant UI as Control Room UI
+    participant GE as Gemini Enterprise
     participant INV as Investigator (rca_telemetry_expert)
     participant MCP as Universal OneMCP Layer
     participant REM as Remediation Worker (remediation_executor A2A)
     participant DOC as Incident Report Writer (incident_report_writer)
 
-    SRE->>UI: Query Alert (e.g., "checkoutservice network isolation reported")
-    UI->>INV: Invoke Investigator Engine
+    SRE->>GE: Query Alert (e.g., "checkoutservice network isolation reported")
+    GE->>INV: Invoke Investigator Engine
     INV->>MCP: Interrogate LOGGING_MCP & GKE_MCP (Network Specialist Skills)
     MCP-->>INV: Detect dropped packets due to restrictive NetworkPolicy
     INV->>MCP: Load RAG Playbook (gke-network-firewall-recovery)
-    INV-->>UI: Stream Diagnostic Findings & Propose Action under Tier 2 HITL Gate
-    UI->>SRE: Render Approval Card: [ ✅ Approve & Execute Action ]
-    Note over SRE,UI: Execution halts waiting for human verification
-    SRE->>UI: Click ✅ Approve & Execute (or type APPROVE in chat)
-    UI->>REM: A2A Call with OAuth Bearer: remediation_executor_remote("delete networkpolicy...")
+    INV-->>GE: Stream Diagnostic Findings & Propose Action under Tier 2 HITL Gate
+    GE->>SRE: Render A2UI Approval Widget: [ ✅ Approve & Execute Action ]
+    Note over SRE,GE: Execution halts waiting for human verification
+    SRE->>GE: Click ✅ Approve & Execute (or type APPROVE in chat)
+    GE->>REM: A2A Call with OAuth Bearer: remediation_executor_remote("delete networkpolicy...")
     REM->>MCP: Execute deletion via GKE_MCP and test connectivity
-    REM-->>UI: Return successful recovery confirmation
-    UI->>SRE: Render success brief & release interface immediately
-    UI-->>DOC: ⚡ Spawn Async PostMortem Background Task
+    REM-->>GE: Return successful recovery confirmation
+    GE->>SRE: Render success brief & release interface immediately
+    INV-->>DOC: ⚡ Spawn Async PostMortem Background Task
     DOC->>MCP: Compile report & save to gs://<telemetry-bucket>/reports/
-    DOC-->>UI: Save compiled markdown report to UI cache
+    DOC-->>GE: Save compiled markdown report to GCS archive
 ```
 
 ---
@@ -200,4 +196,4 @@ A core tenet of the **NovaSRE** reporting engine is eliminating arbitrary or imp
 2. **`root_cause_log_timestamp`**: Extracted from the fatal stack trace or firewall drop entry identifying the causal bug.
 3. **`mitigation_verified_time`**: Extracted from Kubernetes event logs confirming workload transition to `Ready: 1/1` or healthy network connectivity test completion.
 
-These immutable log timestamps are synthesized into structured markdown tables inside the Compiled Post-Mortem Reports tab without requiring human data entry or blocking live operational workflows.
+These immutable log timestamps are synthesized into structured markdown tables inside the compiled post-mortem reports archived to GCS, without requiring human data entry or blocking live operational workflows.
