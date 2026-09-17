@@ -31,6 +31,7 @@ locals {
     "networkservices.googleapis.com",
     "notebooks.googleapis.com",
     "observability.googleapis.com",
+    "privilegedaccessmanager.googleapis.com",
     "cloudtrace.googleapis.com",
     "clouderrorreporting.googleapis.com",
     "cloudresourcemanager.googleapis.com",
