@@ -808,6 +808,12 @@ def _get_rca_agent_card():
         version="1.0",
         url="https://dummy.com",
         capabilities=a2a_types.AgentCapabilities(
+            # EXPERIMENT (hop-1 streaming probe): advertise streaming so we can observe
+            # whether GE switches its chat orchestration from message:send to
+            # message:stream when it reads this card. If GE still calls message:send in
+            # the logs, GE ignores the capability for tool-agent calls and no amount of
+            # agent-side streaming work will surface progress.
+            streaming=True,
             extensions=[a2ui_extension],
         ),
         defaultInputModes=["text"],
@@ -845,7 +851,153 @@ def build_rca_agent():
     mgr = A2uiSchemaManager(version="0.8", catalogs=[cfg])
     catalog = mgr.get_selected_catalog()
     a2ui_converter = A2uiPartConverter(catalog, bypass_tool_check=True, version="0.8")
-    config = A2aAgentExecutorConfig(gen_ai_part_converter=a2ui_converter.convert)
+
+    # STREAMING EXPERIMENT: ADK's default A2A request converter builds a RunConfig with
+    # streaming_mode=NONE, so even when GE opens an SSE `message:stream` connection the
+    # model is called non-streaming and only step-boundary events (tool calls, final
+    # answer) flow — no partial text. Wrap the converter to force StreamingMode.SSE so the
+    # model streams partial text fragments, which GE's client renders progressively
+    # ("append content[].text fragments as they arrive"). This is the only thing that can
+    # change the spinner UX, since GE ignores non-text intermediate events.
+    from google.adk.a2a.converters.request_converter import (
+        convert_a2a_request_to_agent_run_request,
+    )
+    from google.adk.agents.run_config import RunConfig, StreamingMode
+
+    def _sse_request_converter(request, part_converter):
+        run_request = convert_a2a_request_to_agent_run_request(request, part_converter)
+        if run_request.run_config is None:
+            run_request.run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+        else:
+            run_request.run_config.streaming_mode = StreamingMode.SSE
+        return run_request
+
+    # NARRATION: content produced by the runner is converted to A2A *artifact*
+    # updates, which GE does not render until task completion. But GE DOES render
+    # genuine `TaskStatusUpdate` *messages* (status.message.parts) as they stream —
+    # verified in GE on 2026-09-16. This interceptor injects a status-message right
+    # before each tool-call event so GE shows human-readable progress during the
+    # ~30s investigation instead of a bare spinner.
+    #
+    # Polish over the first probe: (a) skip SSE *partial* events (StreamingMode.SSE
+    # emits incremental partial function-call events that caused doubled/combined
+    # lines like "get_current_utc_time, list_kubernetes_resources"); (b) collapse
+    # consecutive duplicate narrations (the model paginating logs fired
+    # "list_log_entries" 8× in a row); (c) humanize raw tool names into phrases.
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+    from google.adk.a2a.executor.config import ExecuteInterceptor
+    from a2a.types import (
+        TaskStatusUpdateEvent as _TSU,
+        TaskStatus as _TS,
+        TaskState as _TState,
+        Message as _Msg,
+        Role as _Role,
+        TextPart as _TextPart,
+    )
+
+    # Tools whose calls are internal plumbing / not worth narrating to the user.
+    # NOTE: the remediation delegation tool (remediation_executor_remote) is
+    # intentionally NOT skipped — we narrate it on the RCA's own stream so GE
+    # shows "🔧 Implementing remediation…" during the (otherwise silent) fix.
+    _NARRATION_SKIP = (
+        "hitl", "handle_approval", "load_skill",
+        "utc", "utcnow", "current_time",
+    )
+
+    # Human-readable phrasing for the tools the RCA actually calls. Anything not
+    # listed falls back to a snake_case → prose heuristic below.
+    _NARRATION_PHRASES = {
+        "list_skills": "Loading available skills",
+        "list_kubernetes_resources": "Inspecting Kubernetes resources",
+        "get_kubernetes_resource": "Reading Kubernetes resource details",
+        "list_log_entries": "Searching Cloud Logging",
+        "list_alerts": "Checking active alerts",
+        "list_time_series": "Querying Cloud Monitoring metrics",
+        "query_time_series": "Querying Cloud Monitoring metrics",
+        "remediation_executor_remote": "Implementing remediation",
+    }
+
+    # Tools that represent an action (not investigation) — narrated with a wrench.
+    _ACTION_TOOLS = ("remediation",)
+
+    def _humanize_tool(name):
+        phrase = _NARRATION_PHRASES.get(name)
+        if phrase:
+            return phrase
+        if name.startswith("list_"):
+            return "Listing " + name[len("list_"):].replace("_", " ")
+        if name.startswith("get_"):
+            return "Fetching " + name[len("get_"):].replace("_", " ")
+        return name.replace("_", " ").capitalize()
+
+    def _tool_names(adk_event):
+        names = []
+        try:
+            for fc in adk_event.get_function_calls():
+                if getattr(fc, "name", None):
+                    names.append(fc.name)
+        except Exception:
+            content = getattr(adk_event, "content", None)
+            for p in (getattr(content, "parts", None) or []):
+                fc = getattr(p, "function_call", None)
+                if fc and getattr(fc, "name", None):
+                    names.append(fc.name)
+        return names
+
+    # Per-task memory of the last narration emitted, so consecutive duplicates are
+    # collapsed. Keyed by task_id; capped so a long-lived process can't leak.
+    _last_narration = {}
+
+    async def _narrate_after_event(executor_context, a2a_event, adk_event):
+        # NOTE: do NOT skip `partial` events — in StreamingMode.SSE the function-call
+        # parts ride on partial events, so skipping them suppresses all narration.
+        # The noise filter + consecutive-dedup below handle the combined/duplicate
+        # lines instead.
+        tools = [t for t in _tool_names(adk_event)
+                 if not any(s in t.lower() for s in _NARRATION_SKIP)]
+        task_id = getattr(a2a_event, "task_id", None)
+        context_id = getattr(a2a_event, "context_id", None)
+        if not tools or not task_id or not context_id:
+            return a2a_event
+
+        # De-duplicate tool names within this event, preserving order.
+        seen = set()
+        unique = [t for t in tools if not (t in seen or seen.add(t))]
+        label = " · ".join(_humanize_tool(t) for t in unique[:3])
+
+        # Use a wrench for action steps (remediation), a magnifier for investigation.
+        is_action = any(any(a in t.lower() for a in _ACTION_TOOLS) for t in unique)
+        emoji = "🔧" if is_action else "🔍"
+
+        # Collapse consecutive identical narrations for the same task.
+        if _last_narration.get(task_id) == label:
+            return a2a_event
+        if len(_last_narration) > 256:
+            _last_narration.clear()
+        _last_narration[task_id] = label
+
+        narration = _TSU(
+            task_id=task_id,
+            context_id=context_id,
+            final=False,
+            status=_TS(
+                state=_TState.working,
+                timestamp=_dt.now(_tz.utc).isoformat(),
+                message=_Msg(
+                    message_id=_uuid.uuid4().hex,
+                    role=_Role.agent,
+                    parts=[_TextPart(text=f"{emoji} {label}…")],
+                ),
+            ),
+        )
+        return [narration, a2a_event]
+
+    config = A2aAgentExecutorConfig(
+        gen_ai_part_converter=a2ui_converter.convert,
+        request_converter=_sse_request_converter,
+        execute_interceptors=[ExecuteInterceptor(after_event=_narrate_after_event)],
+    )
 
     return A2aAgentExecutor(runner=runner, config=config, force_new_version=True)
 
