@@ -192,7 +192,7 @@ def _get_remediation_agent_card():
         description="The GKE & GCP Remediation Executor agent. Executes approved GKE workload and GCP network infrastructure healing actions.",
         version="1.0",
         url="https://dummy.com",
-        capabilities=a2a_types.AgentCapabilities(),
+        capabilities=a2a_types.AgentCapabilities(streaming=True),
         defaultInputModes=["text"],
         defaultOutputModes=["text"],
         skills=[],
@@ -219,7 +219,125 @@ def build_remediation_executor():
         memory_service=InMemoryMemoryService(),
         credential_service=InMemoryCredentialService(),
     )
-    return A2aAgentExecutor(runner=runner)
+
+    # --- Live progress narration (mirrors the RCA agent) --------------------
+    # Force the runner into SSE streaming so tool-call events flow incrementally,
+    # and inject a `TaskStatusUpdate` *message* right before each tool-call event
+    # so consumers see human-readable progress ("🔧 <action>…") during the
+    # remediation instead of a bare spinner. Verified for the RCA agent that GE
+    # renders these status-messages live. NOTE: the RCA→remediator hop is unary
+    # today (ADK RemoteA2aAgent hardcodes streaming=False), so this narration
+    # only surfaces when the remediator is invoked over a stream directly.
+    from google.adk.a2a.executor.a2a_agent_executor import A2aAgentExecutorConfig
+    from google.adk.a2a.converters.request_converter import (
+        convert_a2a_request_to_agent_run_request,
+    )
+    from google.adk.agents.run_config import RunConfig, StreamingMode
+    from google.adk.a2a.executor.config import ExecuteInterceptor
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+    from a2a.types import (
+        TaskStatusUpdateEvent as _TSU,
+        TaskStatus as _TS,
+        TaskState as _TState,
+        Message as _Msg,
+        Role as _Role,
+        TextPart as _TextPart,
+    )
+
+    def _sse_request_converter(request, part_converter):
+        run_request = convert_a2a_request_to_agent_run_request(request, part_converter)
+        if run_request.run_config is None:
+            run_request.run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+        else:
+            run_request.run_config.streaming_mode = StreamingMode.SSE
+        return run_request
+
+    # Internal plumbing tools not worth narrating.
+    _NARRATION_SKIP = ("hitl", "handle_approval", "load_skill",
+                       "get_current_utc_time", "request_pam", "pam_grant")
+
+    # Human-readable phrasing for the remediator's write actions. Unlisted tools
+    # fall back to a verb-prefix heuristic below.
+    _NARRATION_PHRASES = {
+        "scale_deployment": "Scaling deployment",
+        "rollout_restart": "Restarting workload",
+        "restart_deployment": "Restarting deployment",
+        "apply_kubernetes_manifest": "Applying Kubernetes manifest",
+        "cordon_node": "Cordoning node",
+        "drain_node": "Draining node",
+    }
+
+    def _humanize_tool(name):
+        phrase = _NARRATION_PHRASES.get(name)
+        if phrase:
+            return phrase
+        for prefix, verb in (
+            ("create_", "Creating "), ("update_", "Updating "),
+            ("patch_", "Patching "), ("delete_", "Deleting "),
+            ("apply_", "Applying "), ("scale_", "Scaling "),
+            ("restart_", "Restarting "), ("rollout_", "Rolling out "),
+            ("list_", "Listing "), ("get_", "Fetching "),
+        ):
+            if name.startswith(prefix):
+                return verb + name[len(prefix):].replace("_", " ")
+        return name.replace("_", " ").capitalize()
+
+    def _tool_names(adk_event):
+        names = []
+        try:
+            for fc in adk_event.get_function_calls():
+                if getattr(fc, "name", None):
+                    names.append(fc.name)
+        except Exception:
+            content = getattr(adk_event, "content", None)
+            for p in (getattr(content, "parts", None) or []):
+                fc = getattr(p, "function_call", None)
+                if fc and getattr(fc, "name", None):
+                    names.append(fc.name)
+        return names
+
+    _last_narration = {}
+
+    async def _narrate_after_event(executor_context, a2a_event, adk_event):
+        tools = [t for t in _tool_names(adk_event)
+                 if not any(s in t.lower() for s in _NARRATION_SKIP)]
+        task_id = getattr(a2a_event, "task_id", None)
+        context_id = getattr(a2a_event, "context_id", None)
+        if not tools or not task_id or not context_id:
+            return a2a_event
+
+        seen = set()
+        unique = [t for t in tools if not (t in seen or seen.add(t))]
+        label = " · ".join(_humanize_tool(t) for t in unique[:3])
+
+        if _last_narration.get(task_id) == label:
+            return a2a_event
+        if len(_last_narration) > 256:
+            _last_narration.clear()
+        _last_narration[task_id] = label
+
+        narration = _TSU(
+            task_id=task_id,
+            context_id=context_id,
+            final=False,
+            status=_TS(
+                state=_TState.working,
+                timestamp=_dt.now(_tz.utc).isoformat(),
+                message=_Msg(
+                    message_id=_uuid.uuid4().hex,
+                    role=_Role.agent,
+                    parts=[_TextPart(text=f"🔧 {label}…")],
+                ),
+            ),
+        )
+        return [narration, a2a_event]
+
+    config = A2aAgentExecutorConfig(
+        request_converter=_sse_request_converter,
+        execute_interceptors=[ExecuteInterceptor(after_event=_narrate_after_event)],
+    )
+    return A2aAgentExecutor(runner=runner, config=config, force_new_version=True)
 
 # Expose the pure A2A Agent template for Vertex AI Agent Engine deployment so Agent Registry registers Agent Type: A2A
 agent_engine = A2aAgent(
